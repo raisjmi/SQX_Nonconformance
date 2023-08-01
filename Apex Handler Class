@@ -1,0 +1,98 @@
+public class CaseTriggerHandler {
+    public static void getCase(List<Case> caseList,Map<Id,Case> oldMap){
+        try{
+            List<SQX_Nonconformance__c> nonconformanceList = new List<SQX_Nonconformance__c>();
+            Set<Decimal> caseNumbers = new Set<Decimal>();
+            Set<Id> caseIds = new Set<Id>();
+            for(Case caseObj: caseList){
+                if(oldMap != null &&  caseObj.Type == 'Problem' && oldMap.get(caseObj.Id).Type != caseObj.Type){
+                    System.debug('if >>');
+                    if(caseObj.SQX_NC_Reference__c == null){
+                        caseNumbers.add(Decimal.valueOf(caseObj.CaseNumber));  
+                    }
+                    nonconformanceList.add(insertRecord(caseObj));
+                }else if(caseObj.Type == 'Problem'){
+                    System.debug('else >>');
+                    nonconformanceList.add(insertRecord(caseObj));
+                }else if(caseObj.Type != 'Problem'){
+                    caseObj.SQX_NC_Reference__c = null;
+                    
+                }
+            }
+            if(!caseNumbers.isEmpty()){
+                Map<Decimal,Id> ReferenceNumberVsId =  new Map<Decimal,Id>();
+                List<SQX_Nonconformance__c> existingNonConformance = [Select id,QMS_Reference__c FROM SQX_Nonconformance__c WHERE QMS_Reference__c IN:caseNumbers];
+                for(SQX_Nonconformance__c obj: existingNonConformance){
+                    ReferenceNumberVsId.put(obj.QMS_Reference__c,obj.Id);
+                }
+                for(SQX_Nonconformance__c obj: nonconformanceList){
+                    if(ReferenceNumberVsId.size() >0 && ReferenceNumberVsId.containsKey(obj.QMS_Reference__c)){
+                        obj.Id = ReferenceNumberVsId.get(obj.QMS_Reference__c);
+                    }
+                }
+            }
+            System.debug('nonconformanceList >>'+nonconformanceList);
+            if(!nonconformanceList.isEmpty()){
+                Database.UpsertResult[] saveResultList =  Database.upsert(nonconformanceList,false);
+                System.debug('saveResultList >>'+saveResultList);
+                Set<Id> ids = new Set<Id>();
+                for (Database.UpsertResult sr : saveResultList) {
+                    if (sr.isSuccess()) {
+                        ids.add(sr.getId());
+                    }
+                }
+                if(!ids.isEmpty()){
+                    System.debug('ids >>'+ids);
+                    Map<Integer,Id> CaseNumberVsNonconformanceId = new Map<Integer,Id>();
+                    List<Case> updateCases = new List<Case>();
+                    List<SQX_Nonconformance__c> getconformanceList = [Select id,QMS_Reference__c FROM SQX_Nonconformance__c WHERE Id IN:ids];
+                    for(SQX_Nonconformance__c obj:getconformanceList){
+                        CaseNumberVsNonconformanceId.put(Integer.valueOf(obj.QMS_Reference__c),obj.Id);
+                    }
+                    System.debug('CaseNumberVsNonconformanceId >>'+CaseNumberVsNonconformanceId);
+                    for(Case caseObj: caseList){
+                        System.debug('CaseNumberVsNonconformanceId.get(caseObj.CaseNumber) >>'+CaseNumberVsNonconformanceId.get(Integer.valueOf(caseObj.CaseNumber)));
+                        if(!CaseNumberVsNonconformanceId.isEmpty() && CaseNumberVsNonconformanceId.containsKey(Integer.valueOf(caseObj.CaseNumber)) && oldMap != null){
+                            caseObj.SQX_NC_Reference__c = CaseNumberVsNonconformanceId.get(Integer.valueOf(caseObj.CaseNumber));
+                            updateCases.add(caseObj);
+                        }else{
+                            caseIds.add(caseObj.Id); 
+                        }
+                    }
+                    if(!caseIds.isEmpty())
+                        updateContact(caseIds,CaseNumberVsNonconformanceId);
+                }
+                
+            }
+        }Catch(Exception ex ){
+            System.debug('Exception >>'+ex.getMessage() +' on line number >>'+ex.getLineNumber());
+        }
+    }
+    @future
+    public static void updateContact(Set<Id> caseIds,Map<Integer,Id> CaseNumberVsNonconformanceId){
+        List<Case> updateCases = new List<Case>();
+        for(Case caseObj: [Select Id,CaseNumber FROM Case WHERE ID IN:caseIds]){
+            System.debug('CaseNumberVsNonconformanceId.get(caseObj.CaseNumber) >>'+CaseNumberVsNonconformanceId.get(Integer.valueOf(caseObj.CaseNumber)));
+            if(!CaseNumberVsNonconformanceId.isEmpty() && CaseNumberVsNonconformanceId.containsKey(Integer.valueOf(caseObj.CaseNumber))){
+                caseObj.SQX_NC_Reference__c = CaseNumberVsNonconformanceId.get(Integer.valueOf(caseObj.CaseNumber));
+                updateCases.add(caseObj);
+            }
+        }
+        if(!updateCases.isEmpty()){
+            Database.update(updateCases,false);
+        }
+    }
+    public static SQX_Nonconformance__c insertRecord(Case caseRecord){
+        System.debug('caseRecord >>'+caseRecord);
+        SQX_Nonconformance__c obj = new SQX_Nonconformance__c();
+        if(caseRecord.SQX_NC_Reference__c != null){
+            obj.Id =  caseRecord.SQX_NC_Reference__c; 
+        }
+        obj.Priority__c = caseRecord.Priority;
+        obj.Title__c = caseRecord.Subject;
+        obj.Description__c = caseRecord.Description;
+        obj.QMS_Reference__c = Decimal.valueOf(caseRecord.CaseNumber);
+        return obj;
+    }
+    
+}
