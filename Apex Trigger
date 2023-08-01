@@ -1,0 +1,3 @@
+trigger CaseTrigger on Case (after insert,before update) {
+    CaseTriggerHandler.getCase(trigger.new,Trigger.oldMap);
+}
